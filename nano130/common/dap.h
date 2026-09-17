@@ -97,10 +97,39 @@ static inline uint32_t dap__str(uint8_t *dst, const char *s)
  * swd.h 的慣例：1=OK、2=WAIT、4=FAULT、7/0=無回應、-1=parity 錯。
  * DAP 的慣例：低 3 bit 放 ACK，parity/protocol 錯另外用 bit3。
  * **兩套編碼長得很像但不一樣**，這種地方最容易寫成直接回傳了事。 */
+/* 可觀測性:最後一個非 OK 的傳輸結果,以及累計出現幾次。
+ * 2026-09-17 加的。在這之前,「probe 掛住了」和「probe 一直在回報錯誤但還活著」
+ * 在外觀上完全一樣——LCD 都停在同一個畫面。分不出這兩者,就沒辦法判斷
+ * 修正有沒有效。 */
+static uint8_t  dap_last_err;      /* DAP_XFER_* 的回應碼 */
+static uint16_t dap_err_count;
+
 static inline uint8_t dap__ack_to_resp(int ack)
 {
     if (ack == 1) return DAP_XFER_OK;
     if (ack == 2) return DAP_XFER_WAIT;
+
+    /* **FAULT / 無回應 / parity 錯:一律先清 sticky error 再回報。**
+     *
+     * SWD 的 sticky error 一旦設起來,在清掉之前每一筆傳輸都回 FAULT。
+     * swd.h 的 swd_mem_read/write 失敗後就會清(「工具才能繼續」),
+     * 但 pyOCD 走的是 DAP_Transfer,不經過那兩支——於是同一個錯誤在
+     * 兩條路徑上有兩種行為。
+     *
+     * 規格上讓主機用 DAP_WriteABORT 去清也是合法的,但這個 repo 已經
+     * 踩過兩次同型的坑(swd.h 兩套回傳慣例、握手只加在送檔那條路徑上),
+     * 這是第三次。**當成規則修:錯誤處理只有一套,不分路徑。**
+     *
+     * 2026-09-17:pyocd flash 抹除階段看到 FAULT ACK @ 0xE000EDF0(DHCSR),
+     * 之後 probe 就再也回不來。 */
+    if (ack == 4 || ack == 0 || ack == 7 || ack < 0)
+        swd__dp_wr(0x0, 0x1Eu);                   /* ABORT:清 sticky error */
+
+    if (ack != 2) {                               /* WAIT 不算錯,swd_xfer 內部已重試過 */
+        dap_last_err = (ack == 4) ? DAP_XFER_FAULT : DAP_XFER_ERROR;
+        dap_err_count++;
+    }
+
     if (ack == 4) return DAP_XFER_FAULT;
     if (ack < 0)  return DAP_XFER_ERROR;          /* parity */
     return DAP_XFER_ERROR;                        /* 7 或 0：線上沒人回應 */
@@ -174,6 +203,16 @@ static inline int dap__xfer_retry(uint32_t apndp, uint32_t rnw, uint32_t reg, ui
 static inline uint32_t dap__transfer(const uint8_t *req, uint8_t *resp)
 {
     uint32_t count = req[2];
+
+    /* **上界檢查：count 完全來自主機,不設限就會寫出 resp[] 之外。**
+     * resp 只有 DAP_PACKET_SIZE(64) byte,讀取每筆回 4 byte 從 resp[3] 起算,
+     * 所以最多 (64-3)/4 = 15 筆;req[2] 卻可以是 255。
+     * 溢位會踩到相鄰的 static 變數,而且不會有任何徵兆——2026-09-17 追
+     * 「probe 出錯後整個掛住」時發現的。主機正常不會超過,但 probe 不該
+     * 依賴主機守規矩。寫入路徑同理:超過就會讀到 req[] 之外的垃圾,
+     * 那更糟——那些垃圾會被寫進 target 的 flash。 */
+    if (count > (DAP_PACKET_SIZE - 3u) / 4u)
+        count = (DAP_PACKET_SIZE - 3u) / 4u;
     const uint8_t *p = &req[3];
     uint8_t *out = &resp[3];
     uint32_t done = 0;
@@ -309,6 +348,16 @@ static inline uint32_t dap__transfer_block(const uint8_t *req, uint8_t *resp)
     uint32_t reg = (uint32_t)(rq & 0x0Cu);
     uint32_t done = 0;
     uint8_t last = DAP_XFER_OK;
+
+    /* 上界檢查,理由同 dap__transfer()。這裡的 count 是 16-bit(最大 65535),
+     * 但 resp 從 resp[4] 起算只塞得下 (64-4)/4 = 15 筆,
+     * req 從 req[5] 起算只讀得到 (64-5)/4 = 14 筆。 */
+    {
+        uint32_t cap = rnw ? (DAP_PACKET_SIZE - 4u) / 4u
+                           : (DAP_PACKET_SIZE - 5u) / 4u;
+        if (count > cap)
+            count = cap;
+    }
 
     resp[0] = ID_DAP_TransferBlock;
 

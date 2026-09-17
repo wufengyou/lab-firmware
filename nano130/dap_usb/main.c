@@ -301,18 +301,34 @@ int main(void)
              * **不會報錯、看起來只是數字怪怪的**。
              * 規則：先數格子再寫，標籤 + 值不得超過 16。 */
             lcd_goto(1, 0);
-            lcd_puts("V:");
-            lcd_puts(USBD_IS_ATTACHED() ? "Y" : "n");
-            lcd_puts(" CFG:");
-            /* g_usbd_UsbConfig 非 0 = 主機已經下過 SET_CONFIGURATION，
-             * **那就是列舉成功的證據**，比看裝置管理員更直接。 */
-            lcd_putc("0123456789ABCDEF"[g_usbd_UsbConfig & 0xF]);
-            /* 換成「處理過幾包 DAP 命令」—— 列舉成功只證明 USB 通了，
-             * 這個數字才證明主機真的在跟指令層講話。 */
-            lcd_puts(" P:");
-            for (int i = 12; i >= 0; i -= 4)
-                lcd_putc("0123456789ABCDEF"[(dap_packets >> i) & 0xF]);
-            lcd_puts("  ");
+            if (g_usbd_UsbConfig == 0) {
+                /* 還沒列舉完:看 VBUS 與 CFG。"V:Y CFG:0 P:0000" = 16 格。 */
+                lcd_puts("V:");
+                lcd_puts(USBD_IS_ATTACHED() ? "Y" : "n");
+                lcd_puts(" CFG:0 P:");
+                for (int i = 12; i >= 0; i -= 4)
+                    lcd_putc("0123456789ABCDEF"[(dap_packets >> i) & 0xF]);
+            } else {
+                /* 列舉完成之後 V 與 CFG 都沒有新資訊了(P 會動就代表兩者都成立),
+                 * 把格子讓給錯誤計數。
+                 * "P:0060 E:4 N:0002" 太長,壓成 "P:0060 E:4 N:02" = 15 格。
+                 *
+                 * E = 最後一個非 OK 的傳輸結果(4=FAULT,8=ERROR/無回應)
+                 * N = 累計錯誤次數(只取低 8 bit)
+                 *
+                 * **這兩個欄位是為了分辨「掛住」和「一直在報錯但還活著」。**
+                 * 2026-09-17 之前這兩種情況在 LCD 上長得一模一樣。
+                 * 只要 P 還在動,probe 就是活的。 */
+                lcd_puts("P:");
+                for (int i = 12; i >= 0; i -= 4)
+                    lcd_putc("0123456789ABCDEF"[(dap_packets >> i) & 0xF]);
+                lcd_puts(" E:");
+                lcd_putc("0123456789ABCDEF"[dap_last_err & 0xF]);
+                lcd_puts(" N:");
+                lcd_putc("0123456789ABCDEF"[(dap_err_count >> 4) & 0xF]);
+                lcd_putc("0123456789ABCDEF"[dap_err_count & 0xF]);
+                lcd_puts(" ");
+            }
         }
     }
 }
