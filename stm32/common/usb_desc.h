@@ -64,9 +64,9 @@ static const uint8_t usb_cfg_desc[41] = {
 static const uint8_t usb_str_lang[4]  = { 4, 0x03, 0x09, 0x04 };   /* langid 0x0409 */
 
 /* UTF-16LE，bLength 包含表頭 2 byte */
-static const uint8_t usb_str_mfg[20] = {
-    20, 0x03,
-    'b',0,'o',0,'a',0,'r',0,'d',0,'-',0,'l',0,'a',0,'b',0,
+static const uint8_t usb_str_mfg[26] = {
+    26, 0x03,
+    'l',0,'a',0,'b',0,'-',0,'f',0,'i',0,'r',0,'m',0,'w',0,'a',0,'r',0,'e',0,
 };
 static const uint8_t usb_str_prod[34] = {
     34, 0x03,

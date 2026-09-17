@@ -111,7 +111,8 @@ static uint32_t cfg_hid_idx = HID_DESC_IDX;
 /* 字串描述元：UTF-16LE，第一個 byte 是長度、第二個是型別(0x03) */
 static uint8_t str_lang[]  = { 4, 0x03, 0x09, 0x04 };            /* en-US */
 static uint8_t str_vendor[] = {
-    20, 0x03, 'b',0, 'o',0, 'a',0, 'r',0, 'd',0, '-',0, 'l',0, 'a',0, 'b',0
+    26, 0x03, 'l',0, 'a',0, 'b',0, '-',0, 'f',0, 'i',0, 'r',0, 'm',0,
+              'w',0, 'a',0, 'r',0, 'e',0
 };
 /* 產品字串**必須帶 "CMSIS-DAP"** —— pyOCD 就是靠它在一堆 HID 裝置裡認出
  * 哪個是 debug probe（USB VID/PID 我們用的是測試配額，不在它的白名單裡）。
